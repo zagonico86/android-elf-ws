@@ -1,0 +1,3 @@
+include ':elfws'
+include ':app'
+rootProject.name = "Elf Ws Test"
