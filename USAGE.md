@@ -1,0 +1,14 @@
+#USAGE
+
+## BASIC USAGE
+
+## EXTEND ElfWsClient
+
+## AUTHENTICATION
+
+### BASIC AUTH
+
+### OAUTH 2
+
+### CUSTOM AUTH
+

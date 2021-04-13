@@ -26,6 +26,10 @@ import android.net.Uri;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 
+import com.zagonico.elfws.auth.ElfWsAuth;
+import com.zagonico.elfws.exception.ElfWsAuthException;
+import com.zagonico.elfws.exception.ElfWsException;
+
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -86,19 +90,43 @@ public class ElfWsClient implements Runnable {
         FILE_UPLOAD,
     };
 
+    /**
+     * Actions configured for the next request.
+     */
     List<ElfWsAction> actions;
+    /**
+     * GET and POST parameters for next request
+     */
     Map<String, String> getParameters;
     Map<String, String> postParameters;
+    /**
+     * Addictional headers for next request
+     */
+    Map<String, String> addictionalHeaders;
 
     JSONObject jsonToUpload;
 
+    /**
+     * List of files to upload in the next request, with all their information
+     */
+    List<byte[]> stringToUpload;
     List<String> stringToUpload_fieldName;
     List<String> stringToUpload_fileName;
     List<String> stringToUpload_mime;
-    List<byte[]> stringToUpload;
 
+    /**
+     * Url for the next request
+     */
     private String url;
+    /**
+     * Callback to elaborate the response to the next request
+     */
     private ElfWsCallback callback;
+
+    /**
+     * class to manage authentication
+     */
+    private ElfWsAuth auth;
 
     public ElfWsClient() {
         this(null, null);
@@ -115,11 +143,11 @@ public class ElfWsClient implements Runnable {
     /**
      * Constructor where the url of ws and the callback that will elaborate the response are specified.
      * @param url the ws url
-     * @param callback the callback that will elaborate the response
+     * @param auth the auth class to use in the ws client
      */
-    public ElfWsClient(String url, ElfWsCallback callback) {
+    public ElfWsClient(String url, ElfWsAuth auth) {
         this.url = url;
-        this.callback = callback;
+        this.auth = auth;
         resetAllRequests();
     }
 
@@ -162,6 +190,26 @@ public class ElfWsClient implements Runnable {
     }
 
     /**
+     * Remove auth class from the client.
+     */
+    public void removeAuth() {
+        if (PROCESSING) throw new IllegalThreadStateException("Cannot change parameters while performing a http request");
+        this.auth = null;
+    }
+
+    /**
+     * Set the {@link com.zagonico.elfws.auth.ElfWsAuth ElfWsAuth} that will be used
+     * while performing the current request.
+     *
+     * @param auth
+     *        instance of {@link com.zagonico.elfws.auth.ElfWsAuth ElfWsAuth}
+     */
+    public void setAuth(ElfWsAuth auth) {
+        if (PROCESSING) throw new IllegalThreadStateException("Cannot change parameters while performing a http request");
+        this.auth = auth;
+    }
+
+    /**
      * Clean current pending requests.
      */
     public void resetAllRequests() {
@@ -182,6 +230,7 @@ public class ElfWsClient implements Runnable {
         stringToUpload_fileName = new ArrayList<>();
         stringToUpload_mime = new ArrayList<>();
         stringToUpload = new ArrayList<>();
+        addictionalHeaders = null;
     }
 
     /**
@@ -198,8 +247,11 @@ public class ElfWsClient implements Runnable {
      *
      * @param json
      *        if true reset json
+     *
+     * @param headers
+     *        if true reset headers
      */
-    public void resetRequest(boolean get, boolean post, boolean file, boolean json) {
+    public void resetRequest(boolean get, boolean post, boolean file, boolean json, boolean headers) {
         if (PROCESSING) throw new IllegalThreadStateException("Cannot change parameters while performing a http request");
 
         if (get) {
@@ -220,6 +272,9 @@ public class ElfWsClient implements Runnable {
         if (json) {
             actions.remove(ElfWsAction.JSON_UPLOAD);
             jsonToUpload = null;
+        }
+        if (headers) {
+            addictionalHeaders = null;
         }
     }
 
@@ -421,6 +476,21 @@ public class ElfWsClient implements Runnable {
     }
 
     /**
+     * Add addictional headers to be added to the request
+     *
+     * @param headers
+     *        couples header - value
+     */
+    public void setAddictionalHeaders(Map<String, String> headers) {
+        if (PROCESSING) throw new IllegalThreadStateException("Cannot change parameters while performing a http request");
+
+        if (addictionalHeaders != null)
+            addictionalHeaders.putAll(headers);
+        else
+            addictionalHeaders = headers;
+    }
+
+    /**
      * Make the request to address using data specified by previous addPost, addGet and addFile.
      *
      * @param address
@@ -459,6 +529,17 @@ public class ElfWsClient implements Runnable {
                 conn.setDoOutput(false);
                 conn.setRequestMethod("GET");
             }
+
+            if (auth != null) {
+                auth.modifyConnection(conn);
+            }
+
+            if (addictionalHeaders != null) {
+                for (String header : addictionalHeaders.keySet()) {
+                    conn.setRequestProperty(header, addictionalHeaders.get(header));
+                }
+            }
+
             conn.setDoInput(true);
             conn.setUseCaches(false);
 
@@ -489,8 +570,17 @@ public class ElfWsClient implements Runnable {
             }
 
             String line, response = "";
-            BufferedReader reader = new BufferedReader(new
-                    InputStreamReader(conn.getInputStream()));
+
+            elfWsResponse = new ElfWsResponse(conn.getResponseCode(), conn.getHeaderFields());
+
+            BufferedReader reader;
+            if (conn.getResponseCode() < HttpURLConnection.HTTP_BAD_REQUEST) {
+                reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+            }
+            else {
+                reader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
+            }
+
             while ((line = reader.readLine()) != null) {
                 response += ("".equals(response) ? "" : "\n") + line;
             }
@@ -504,14 +594,12 @@ public class ElfWsClient implements Runnable {
             }
 
             String contentType = conn.getHeaderField("Content-Type");
-            // raw = "attachment; filename=abc.jpg"
             String mime = "";
-            if (contentDisp != null && contentDisp.contains(":")) {
-                mime = contentType.split(":")[1];
-                mime = mime.substring(1, mime.length()-1);
+            if (contentType != null) {
+                mime = contentType;
             }
 
-            elfWsResponse = new ElfWsResponse(fileName, mime, response);
+            elfWsResponse.addContentInfo(fileName, mime, response);
 
             reader.close();
         }
@@ -612,6 +700,12 @@ public class ElfWsClient implements Runnable {
         if (url == null || "".equals(url)) throw new IllegalStateException("No url specified");
 
         PROCESSING = true;
+
+        if (auth != null) {
+            if (!auth.beforeRequest()) {
+                throw new ElfWsAuthException(auth.error());
+            }
+        }
 
         ElfWsResponse response = httpRequest(url, true);
 

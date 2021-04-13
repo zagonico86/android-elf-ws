@@ -1,0 +1,7 @@
+# CHANGELOG
+
+## V. 1.0.0 - 2021-04- - Initial version
+* Manage GET, POST as Map<String, String> and FILE from Uri, File, InputStream and String.
+* ElfWsAuth interface with ElfAuthBasic and ElfOAuth2 classes for authentication
+* ElfWsCallback to manage the response, which is encapsuled in an ElfWsResponse object (with headers,
+  response code and content of the http response).
