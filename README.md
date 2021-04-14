@@ -8,11 +8,14 @@ Android Apps.
 Clone or download the zip, put the `elfws` module in the root of your project and add the module
 to the dependencies of your App.
 
-# Test note
+# Test notes
 The git contains:
  * Elf Ws Client module
  * Elf Ws Client Test App
- * a small php rest ws used by the test App.
+ * a small php rest ws to test the App
+   * ws.php - plain rest ws
+   * ws-basic.php - rest ws requiring basic auth (user: elfws, password: test)
+   * ws-custom-auth.php - rest ws requiring a custom header as authentication.
 
 To try the library you can:
 1. clone the git
@@ -21,7 +24,8 @@ To try the library you can:
 4. try the App calling the WS of point 3
 
 ## Usage
-Here an usage example:
+Here an usage example. See [USAGE](https://gitlab.com/zagonico/elf-ws-client/-/blob/master/USAGE.md) for more examples.
+
 ```java
 ElfWsClient client = new ElfWsClient(url);
 

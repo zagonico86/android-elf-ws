@@ -1,3 +1,24 @@
+/*
+Copyright (c) 2021 Nicola Zago
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 package com.zagonico.elfwstest;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -9,22 +30,76 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.EditText;
+import android.widget.Spinner;
 import android.widget.Toast;
 
 import com.zagonico.elfws.ElfWsCallback;
 import com.zagonico.elfws.ElfWsResponse;
+import com.zagonico.elfws.auth.ElfAuthBasic;
+import com.zagonico.elfws.auth.ElfOAuth2;
+import com.zagonico.elfws.auth.ElfWsAuth;
 
 public class MainActivity extends AppCompatActivity {
     private static final int OPEN_ATTACHMENT_FOR_UPLOAD_1 = 1001;
     private static final int OPEN_ATTACHMENT_FOR_UPLOAD_2 = 1002;
     private ElfWsTest elfWsTest;
+    private ElfWsAuth auth;
     private Uri uri1, uri2;
+
+    private Spinner spinnerAuth;
+    private GenericSpinnerAdapter adapterAuth;
+    private GenericPair[] pairsAuth;
+    private GenericPair selectedAuth;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        spinnerAuth = findViewById(R.id.auth_spinner);
+
+        pairsAuth = new GenericPair[4];
+        pairsAuth[0] = new GenericPair("none", "None");
+        pairsAuth[1] = new GenericPair("basic", "Basic");
+        pairsAuth[2] = new GenericPair("custom", "Custom");
+        pairsAuth[3] = new GenericPair("oauth2", "OAuth2");
+
+        adapterAuth = new GenericSpinnerAdapter( this,
+                R.layout.my_spinner_item,
+                pairsAuth);
+        spinnerAuth.setAdapter(adapterAuth);
+        spinnerAuth.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+
+            @Override
+            public void onItemSelected(AdapterView<?> adapterView, View view,
+                                       int position, long id) {
+                selectedAuth = adapterAuth.getItem(position);
+
+                if (elfWsTest==null) return;
+
+                switch (selectedAuth.id) {
+                    case "none":
+                        auth = null;
+                        elfWsTest.removeAuth();
+                        break;
+                    case "basic":
+                        auth = new ElfAuthBasic("elfws", "test");
+                        break;
+                    case "custom":
+                        auth = new MyCustomAuth("Test");
+                        break;
+                    case "oauth2":
+                        auth = new ElfOAuth2("","","",null);
+                        break;
+                }
+                elfWsTest.setAuth(auth);
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> adapter) {  }
+        });
+
     }
 
     public void initWsElf(View view) {
