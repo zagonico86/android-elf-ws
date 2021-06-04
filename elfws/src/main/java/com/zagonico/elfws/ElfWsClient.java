@@ -86,7 +86,8 @@ public class ElfWsClient implements Runnable {
     public enum ElfWsAction {
         GET,
         POST,
-        JSON_UPLOAD,
+        JSON_REQUEST,
+        XML_REQUEST,
         FILE_UPLOAD,
     };
 
@@ -104,7 +105,11 @@ public class ElfWsClient implements Runnable {
      */
     Map<String, String> addictionalHeaders;
 
-    JSONObject jsonToUpload;
+    /**
+     * json or xml data for JSON and XML requests
+     */
+    JSONObject jsonData;
+    String xmlData;
 
     /**
      * List of files to upload in the next request, with all their information
@@ -225,7 +230,8 @@ public class ElfWsClient implements Runnable {
         actions = new ArrayList<>();
         getParameters = null;
         postParameters = null;
-        jsonToUpload = null;
+        jsonData = null;
+        xmlData = null;
         stringToUpload_fieldName = new ArrayList<>();
         stringToUpload_fileName = new ArrayList<>();
         stringToUpload_mime = new ArrayList<>();
@@ -248,10 +254,13 @@ public class ElfWsClient implements Runnable {
      * @param json
      *        if true reset json
      *
+     * @param xml
+     *        if true reset xml
+     *
      * @param headers
      *        if true reset headers
      */
-    public void resetRequest(boolean get, boolean post, boolean file, boolean json, boolean headers) {
+    public void resetRequest(boolean get, boolean post, boolean file, boolean json, boolean xml, boolean headers) {
         if (PROCESSING) throw new IllegalThreadStateException("Cannot change parameters while performing a http request");
 
         if (get) {
@@ -270,8 +279,12 @@ public class ElfWsClient implements Runnable {
             stringToUpload = new ArrayList<>();
         }
         if (json) {
-            actions.remove(ElfWsAction.JSON_UPLOAD);
-            jsonToUpload = null;
+            actions.remove(ElfWsAction.JSON_REQUEST);
+            jsonData = null;
+        }
+        if (xml) {
+            actions.remove(ElfWsAction.XML_REQUEST);
+            xmlData = null;
         }
         if (headers) {
             addictionalHeaders = null;
@@ -466,13 +479,54 @@ public class ElfWsClient implements Runnable {
         return true;
     }
 
+    /**
+     * Add JSON data that will be posted.
+     * @param json the json object
+     * @return true is success enqueuing data, false if it fails
+     */
+    public boolean addJson(JSONObject json) {
+        if (PROCESSING) throw new IllegalThreadStateException("Cannot change parameters while performing a http request");
+
+        if (json == null) return false;
+
+        if (!actions.contains(ElfWsAction.JSON_REQUEST)) actions.add(ElfWsAction.JSON_REQUEST);
+
+        jsonData = json;
+
+        return true;
+    }
+
+    /**
+     * Add XML data that will be posted.
+     * @param xml the xml object
+     * @return true is success enqueuing data, false if it fails
+     */
+    public boolean addXml(String xml) {
+        if (PROCESSING) throw new IllegalThreadStateException("Cannot change parameters while performing a http request");
+
+        if (xml == null) return false;
+
+        if (!actions.contains(ElfWsAction.XML_REQUEST)) actions.add(ElfWsAction.XML_REQUEST);
+
+        xmlData = xml;
+
+        return true;
+    }
+
     private boolean isPost() {
         return actions.contains(ElfWsAction.POST);
     }
 
+    private boolean isJson() {
+        return actions.contains(ElfWsAction.JSON_REQUEST);
+    }
+
+    private boolean isXml() {
+        return actions.contains(ElfWsAction.XML_REQUEST);
+    }
+
     private boolean isUpload() {
-        return actions.contains(ElfWsAction.FILE_UPLOAD)
-                || actions.contains(ElfWsAction.JSON_UPLOAD);
+        return actions.contains(ElfWsAction.FILE_UPLOAD);
     }
 
     /**
@@ -521,7 +575,7 @@ public class ElfWsClient implements Runnable {
             else
                 conn = (HttpURLConnection) url.openConnection();
 
-            if (isPost() || isUpload()) {
+            if (isPost() || isUpload() || isJson() || isXml()) {
                 conn.setDoOutput(true);
                 conn.setRequestMethod("POST");
             }
@@ -544,7 +598,13 @@ public class ElfWsClient implements Runnable {
             conn.setUseCaches(false);
 
             String boundary = "------"+System.currentTimeMillis();
-            if (isUpload()) {       // with files it needs to be multipart
+            if (isJson()) {
+                conn.setRequestProperty("Content-Type", "application/json");
+            }
+            else if (isXml()) {
+                conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+            }
+            else if (isUpload()) {       // with files it needs to be multipart
                 conn.setRequestProperty("content-type", "multipart/form-data;; boundary="+boundary); //boundary="+boundary
             }
             else if (isPost()) {    // normal form post
@@ -553,18 +613,31 @@ public class ElfWsClient implements Runnable {
             conn.setRequestProperty( "cache-control", "no-cache" );
             conn.setRequestProperty( "Accept", "*/*" );
 
-            if (isUpload() || isPost()) {
-                conn.setRequestProperty("Expect", "100-continue");
-                conn.setRequestProperty("Connection", "close");
+            if (isUpload() || isPost() || isJson() || isXml()) {
+                if (!isXml()) {
+                    conn.setRequestProperty("Expect", "100-continue");
+                    conn.setRequestProperty("Connection", "close");
+                }
 
                 OutputStreamWriter writer = new OutputStreamWriter(conn.getOutputStream());
 
-                writePost(writer, boundary);
+                if (isJson()) {
+                    writer.write(jsonData.toString());
+                    writer.write("\r\n");
+                }
+                else if (isXml()) {
+                    writer.write(xmlData.toString());
+                    writer.write("\r\n");
+                }
+                else {
+                    writePost(writer, boundary);
+                    writeFiles(writer, boundary);
+                }
 
-                writeFiles(writer, boundary);
+                // last boundary if is multipart
+                if (isPost())
+                    writer.write("--" + boundary + "--\r\n");
 
-                // last boundary
-                writer.write("--" + boundary + "--\r\n");
                 writer.flush();
                 writer.close();
             }
@@ -635,21 +708,6 @@ public class ElfWsClient implements Runnable {
 
     private void writeFiles(OutputStreamWriter writer, String boundary) {
         try {
-            if (jsonToUpload != null) {
-                writer.write("--" + boundary + "\r\n");
-                writer.write("Content-Disposition: form-data; name=\"jsonData\"\r\n");
-                writer.write("Content-Type: application/json; charset=utf-8\r\n");
-                writer.write("\r\n");
-                String content = "";
-                try {
-                    content = jsonToUpload.toString();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                writer.write(content);
-                writer.write("\r\n");
-            }
-
             if (stringToUpload != null && stringToUpload.size()>0) {
                 for (int i=0; i<stringToUpload.size(); i++) {
                     byte[] content = stringToUpload.get(i);
